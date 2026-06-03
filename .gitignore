@@ -1,0 +1,21 @@
+# .NET build artifacts
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# Rider / Visual Studio / VS Code
+.idea/
+.vs/
+.vscode/
+
+# Secrets and environment
+.env
+appsettings.Production.json
+
+# NuGet
+*.nupkg
+.nuget/
+
+# Docker override
+docker-compose.override.yml
