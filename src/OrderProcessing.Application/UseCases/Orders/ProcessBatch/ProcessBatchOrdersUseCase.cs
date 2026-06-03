@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OrderProcessing.Application.DTOs;
 using OrderProcessing.Application.Interfaces.UseCases;
@@ -14,16 +15,16 @@ public sealed class ProcessBatchOrdersUseCase : IProcessBatchOrdersUseCase
     private const int MaxConcurrency = 5;
 
     private readonly IBatchJobRepository _batchJobRepository;
-    private readonly IOrderRepository _orderRepository;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<ProcessBatchOrdersUseCase> _logger;
 
     public ProcessBatchOrdersUseCase(
         IBatchJobRepository batchJobRepository,
-        IOrderRepository orderRepository,
+        IServiceScopeFactory scopeFactory,
         ILogger<ProcessBatchOrdersUseCase> logger)
     {
         _batchJobRepository = batchJobRepository;
-        _orderRepository = orderRepository;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -75,12 +76,19 @@ public sealed class ProcessBatchOrdersUseCase : IProcessBatchOrdersUseCase
         await semaphore.WaitAsync(cancellationToken);
         try
         {
+            // Each parallel task needs its own DbContext instance.
+            // DbContext is NOT thread-safe: sharing one scope across concurrent tasks causes race
+            // conditions and the SqlServerRetryingExecutionStrategy to reject implicit transactions.
+            // IServiceScopeFactory is a singleton — safe to inject and call from any thread.
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var orderRepository = scope.ServiceProvider.GetRequiredService<IOrderRepository>();
+
             var order = Order.Create(batchJobId, input.CustomerName);
 
             foreach (var item in input.Items)
                 order.AddItem(item.ProductName, item.Quantity, item.UnitPrice);
 
-            await _orderRepository.AddAsync(order, cancellationToken);
+            await orderRepository.AddAsync(order, cancellationToken);
 
             order.MarkAsProcessing();
 
@@ -91,14 +99,14 @@ public sealed class ProcessBatchOrdersUseCase : IProcessBatchOrdersUseCase
             await Task.Delay(Random.Shared.Next(50, 300), cancellationToken);
 
             order.MarkAsCompleted();
-            await _orderRepository.UpdateAsync(order, cancellationToken);
+            await orderRepository.UpdateAsync(order, cancellationToken);
 
             _logger.OrderCompleted(order.Id);
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.OrderFailed(Guid.Empty, ex.Message);
+            _logger.OrderFailed(batchJobId, ex.Message);
             return false;
         }
         finally

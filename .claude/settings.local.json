@@ -5,7 +5,9 @@
       "Bash(dotnet sdk *)",
       "Bash(dotnet add *)",
       "Bash(dotnet build *)",
-      "Bash(dotnet ef *)"
+      "Bash(dotnet ef *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)"
     ]
   }
 }
